@@ -1,107 +1,8 @@
-//!
-//! # CircularBuffer
-//!
-//! A zero dependencies, zero run-time allocation, circular buffer.
-//!
-//! This crates provide a simple circular buffer that does not do any allocation at run time. The
-//! main focus of this crate is correctess and performances.
-//!
-//! The circular buffer never wait, if the buffer is full, it overwrite the first element.
-//!
-//! The API is extremelly simple, you create the buffer specify how many elements the buffer can
-//! hold. Then you can start pushing elements into it.
-//!
-//! ```
-//! use rbl_circular_buffer::*;
-//!
-//! let mut buffer = CircularBuffer::new(3);
-//! assert_eq!(0, buffer.len());
-//!
-//! buffer.push(1);
-//! assert_eq!(1, buffer.len());
-//!
-//! buffer.push(2);
-//! assert_eq!(2, buffer.len());
-//!
-//! buffer.push(3);
-//! assert_eq!(3, buffer.len());
-//!
-//! // now the buffer is full, we can insert the next element, but it will overwrite the first one
-//! buffer.push(4);
-//! assert_eq!(3, buffer.len());
-//!
-//! let v: Vec<u32> = buffer.collect();
-//! assert_eq!(vec![2,3,4], v);
-//! ```
-//! There are two ways to read the elements from the buffer.
-//! 1. `CircularBuffer` implement the `Iterator` trait, you can loop over it.
-//! 2. `CircularBuffer` provided the `.fill()` method.
-//!
-//! ## Using the iterator
-//!
-//! The iterator will consume the elements in the buffer.
-//!
-//! ```
-//! use rbl_circular_buffer::*;
-//!
-//! let mut buffer = CircularBuffer::new(3);
-//! buffer.push(1);
-//! buffer.push(2);
-//! buffer.push(3);
-//!
-//! let mut sum = 0;
-//! for element in &mut buffer {
-//!     sum += element;
-//! }
-//! assert_eq!(1 + 2 + 3, sum);
-//! assert_eq!(0, buffer.len());
-//! ```
-//!
-//! ## Filling a vector
-//!
-//! In demanding application, the iterator can be a bad choice.
-//!
-//! Think about communication between threads, each thread can have a reference to the
-//! `CircularBuffer` and take a lock while reading from it. If the reading operation are not fast
-//! enough, or simply if there are too many elements, the lock will be hold for a long period of
-//! time. The alternative is to fill a vector.
-//!
-//! ```
-//! use rbl_circular_buffer::*;
-//!
-//! // let's make a bigger vector
-//! let mut buffer = CircularBuffer::new(5);
-//! for i in 1..=5 {
-//!     buffer.push(i);
-//! }
-//!
-//! // with this vector we will remove the first 3 elements
-//! let mut v = Vec::with_capacity(3);
-//!
-//! buffer.fill(&mut v);
-//! assert_eq!(vec![1, 2, 3], v);
-//!
-//! // in the vector there are still 4 and 5
-//! assert_eq!(2, buffer.len());
-//!
-//! buffer.push(6);
-//! buffer.push(7);
-//! buffer.push(8);
-//!
-//! // the fill avoid any allocation even in the vector to fill.
-//! // if we remove one element, and refill, we will push only one element.
-//! // this because `.fill()` does not allocate any memory.
-//!
-//! v.remove(0);
-//!
-//! buffer.fill(&mut v);
-//!
-//! assert_eq!(vec![2, 3, 4], v);
-//! assert_eq!(4, buffer.len())
-//! ```
-//!
+#![no_std]
 
-use std::convert::TryInto;
+use core::convert::TryInto;
+extern crate alloc;
+use alloc::vec::Vec;
 
 #[cfg(test)]
 mod tests;
@@ -125,12 +26,12 @@ impl<T> CircularBuffer<T> {
     /// Negligible amount of space used by the CircularBuffer beside the array itself.
     pub fn new(size: usize) -> Self {
         let size = size;
-        let type_size = std::mem::size_of::<T>();
+        let type_size = core::mem::size_of::<T>();
         let vector_size = type_size.checked_mul(size).unwrap();
-        let aligment = std::mem::align_of::<T>();
+        let aligment = core::mem::align_of::<T>();
 
-        let layout = std::alloc::Layout::from_size_align(vector_size, aligment).unwrap();
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        let layout = core::alloc::Layout::from_size_align(vector_size, aligment).unwrap();
+        let ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
 
         CircularBuffer {
             buffer: ptr.cast(),
@@ -191,7 +92,7 @@ impl<T> CircularBuffer<T> {
     fn drop(&mut self) {
         unsafe {
             let ptr = self.buffer.offset(self.w.try_into().unwrap());
-            std::ptr::drop_in_place(ptr);
+            core::ptr::drop_in_place(ptr);
         }
     }
 
@@ -247,7 +148,7 @@ impl<T> CircularBuffer<T> {
         i
     }
 
-    fn split_in_ranges(&self) -> (std::ops::Range<usize>, Option<std::ops::Range<usize>>) {
+    fn split_in_ranges(&self) -> (core::ops::Range<usize>, Option<core::ops::Range<usize>>) {
         if self.r < self.w {
             (self.r..self.w, None)
         } else if self.r == self.w {
@@ -261,7 +162,7 @@ impl<T> CircularBuffer<T> {
         }
     }
 
-    fn fill_vector_from_split(&mut self, range: std::ops::Range<usize>, vec: &mut Vec<T>) -> usize {
+    fn fill_vector_from_split(&mut self, range: core::ops::Range<usize>, vec: &mut Vec<T>) -> usize {
         let sink_capacity = vec.capacity() - vec.len();
         if sink_capacity == 0 {
             return 0;
@@ -279,7 +180,7 @@ impl<T> CircularBuffer<T> {
 
         unsafe {
             let ptr = vec.as_mut_ptr().add(vec.len());
-            std::ptr::copy_nonoverlapping(self.buffer.add(to_push.start), ptr, to_push.len());
+            core::ptr::copy_nonoverlapping(self.buffer.add(to_push.start), ptr, to_push.len());
             vec.set_len(vec.len() + to_push.len());
         }
 
@@ -333,7 +234,7 @@ impl<T: Clone> Clone for CircularBuffer<T> {
                 let r_ptr = self.buffer.add(i);
                 let e0 = r_ptr.read();
                 let e1 = e0.clone();
-                std::mem::forget(e0);
+                core::mem::forget(e0);
                 let w_buffer = new.buffer as *mut T;
                 let w_ptr = w_buffer.add(i);
                 w_ptr.write(e1);
@@ -345,7 +246,7 @@ impl<T: Clone> Clone for CircularBuffer<T> {
                     let r_ptr = self.buffer.add(i);
                     let e0 = r_ptr.read();
                     let e1 = e0.clone();
-                    std::mem::forget(e0);
+                    core::mem::forget(e0);
                     let w_buffer = new.buffer as *mut T;
                     let w_ptr = w_buffer.add(i);
                     w_ptr.write(e1);
@@ -359,7 +260,7 @@ impl<T: Clone> Clone for CircularBuffer<T> {
 
 /// Create an iterator, elements from the iterator are consumed and are not present anymore in the
 /// buffer.
-impl<T> std::iter::Iterator for CircularBuffer<T> {
+impl<T> core::iter::Iterator for CircularBuffer<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -377,8 +278,8 @@ impl<T> std::iter::Iterator for CircularBuffer<T> {
     }
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for CircularBuffer<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: core::fmt::Debug> core::fmt::Debug for CircularBuffer<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.len() == 0 {
             return write!(f, "CircularBuffer(<empty>)");
         }
@@ -389,8 +290,8 @@ impl<T: std::fmt::Debug> std::fmt::Debug for CircularBuffer<T> {
             let ptr = self.buffer.offset(read);
             ptr.read()
         };
-        std::fmt::Debug::fmt(&element, f)?;
-        std::mem::forget(element);
+        core::fmt::Debug::fmt(&element, f)?;
+        core::mem::forget(element);
         fake_read = self.next_inc(fake_read);
         while fake_read != self.w {
             write!(f, ", ")?;
@@ -399,8 +300,8 @@ impl<T: std::fmt::Debug> std::fmt::Debug for CircularBuffer<T> {
                 let ptr = self.buffer.offset(read);
                 ptr.read()
             };
-            std::fmt::Debug::fmt(&element, f)?;
-            std::mem::forget(element);
+            core::fmt::Debug::fmt(&element, f)?;
+            core::mem::forget(element);
             fake_read = self.next_inc(fake_read);
         }
         write!(
@@ -411,8 +312,8 @@ impl<T: std::fmt::Debug> std::fmt::Debug for CircularBuffer<T> {
     }
 }
 
-impl<T: std::fmt::Display> std::fmt::Display for CircularBuffer<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: core::fmt::Display> core::fmt::Display for CircularBuffer<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.len() == 0 {
             return write!(f, "CircularBuffer(<empty>)");
         }
@@ -423,8 +324,8 @@ impl<T: std::fmt::Display> std::fmt::Display for CircularBuffer<T> {
             let ptr = self.buffer.offset(read);
             ptr.read()
         };
-        std::fmt::Display::fmt(&element, f)?;
-        std::mem::forget(element);
+        core::fmt::Display::fmt(&element, f)?;
+        core::mem::forget(element);
         fake_read = self.next_inc(fake_read);
         while fake_read != self.w {
             write!(f, ", ")?;
@@ -433,8 +334,8 @@ impl<T: std::fmt::Display> std::fmt::Display for CircularBuffer<T> {
                 let ptr = self.buffer.offset(read);
                 ptr.read()
             };
-            std::fmt::Display::fmt(&element, f)?;
-            std::mem::forget(element);
+            core::fmt::Display::fmt(&element, f)?;
+            core::mem::forget(element);
             fake_read = self.next_inc(fake_read);
         }
         write!(f, ")")

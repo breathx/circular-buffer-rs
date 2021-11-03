@@ -1,4 +1,6 @@
 use super::*;
+extern crate alloc;
+use alloc::{vec, format, string::String};
 
 use proptest::prelude::*;
 #[test]
@@ -197,13 +199,13 @@ proptest! {
         for (to_add, to_remove) in matrix {
             for i in to_add {
                 b.push(i);
-                counted_len = std::cmp::min(size, counted_len+1);
+                counted_len = core::cmp::min(size, counted_len+1);
                 assert_eq!(counted_len, b.len());
                 assert!(r.contains(&counted_len))
             }
             let mut drainer = Vec::with_capacity(to_remove);
             let removed = b.fill(&mut drainer);
-            assert_eq!(std::cmp::min(counted_len, to_remove), removed);
+            assert_eq!(core::cmp::min(counted_len, to_remove), removed);
             counted_len = counted_len - removed;
             assert_eq!(counted_len, b.len());
             assert!(r.contains(&counted_len));
@@ -229,7 +231,7 @@ proptest! {
             }
 
             let mut v_drainer = Vec::with_capacity(to_remove);
-            for _ in 0..std::cmp::min(to_remove, v.len()) {
+            for _ in 0..core::cmp::min(to_remove, v.len()) {
                 v_drainer.push(v.remove(0));
             }
 
